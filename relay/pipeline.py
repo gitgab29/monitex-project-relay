@@ -28,6 +28,7 @@ from .capture.overlay import OverlayWindow, draw
 from .capture.recorder import SessionRecorder
 from .capture.source import FileSource, Frame, WebcamSource, open_source
 from .config import Settings
+from .detect.static_filter import StaticObjectFilter
 from .ids import new_run_id, session_id_from_path, video_ts
 from .schema import Observation
 from .store import Store
@@ -70,6 +71,7 @@ class Pipeline:
         # Injected in later blocks; None here means "capture only", which is exactly what
         # `--vision none --no-n8n` should do.
         self.detector = detector
+        self.static_filter = StaticObjectFilter(cfg) if cfg.static_filter else None
         self.state_machine = state_machine
         self.enricher = enricher
         self.router = router
@@ -213,6 +215,11 @@ class Pipeline:
         state machine; Block 4 the model call; Block 5 the routing.
         """
         detections = self.detector.detect(frame.image) if self.detector else []
+        # A photograph on the wall is a person-shaped region, and YOLO is right to box it.
+        # Dropping it here rather than in the state machine keeps "what is in the frame"
+        # honest for everything downstream, including the recorded observation.
+        if self.static_filter is not None:
+            detections = self.static_filter.apply(frame.image, detections)
         obs = Observation(
             session_id=self.session_id, frame_index=frame.index, video_ts_ms=frame.video_ts_ms,
             motion_score=decision.score, mean_luma=decision.mean_luma, detections=detections,

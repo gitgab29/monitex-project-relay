@@ -67,7 +67,8 @@ class GeminiBackend:
         else:
             system = VERDICT_SYSTEM
             user = verdict_user(
-                req.observed, req.yolo_person_count, req.yolo_post_count, req.site_id, req.video_ts
+                req.observed, req.yolo_person_count, req.yolo_post_count, req.site_id,
+                req.video_ts, expected_occupant=self.cfg.expected_occupant,
             )
 
         contents = [

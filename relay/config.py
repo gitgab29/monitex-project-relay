@@ -111,6 +111,18 @@ class Settings:
     review_conf_high: float = 0.90
 
     # vision
+    # --- static-object suppression (pictures, posters, screens) -------------------
+    static_filter: bool = True
+    static_min_frames: int = 20
+    static_pixel_eps: float = 2.5
+    static_match_iou: float = 0.85
+
+    #: Free-text description of whoever is SUPPOSED to be at this post, e.g.
+    #: "wears glasses and over-ear headphones". Given to the model so it can tell the
+    #: assigned officer from a stranger. Empty = every person at the post is equally
+    #: unidentified, which is the safe default for a site that has not configured it.
+    expected_occupant: str = ""
+
     vision_backend: str = "gemini"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
@@ -250,6 +262,11 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env", *, override:
         review_conf_threshold=_f("REVIEW_CONF_THRESHOLD", 0.75),
         review_conf_other=_f("REVIEW_CONF_OTHER", 0.85),
         review_conf_high=_f("REVIEW_CONF_HIGH", 0.90),
+        static_filter=_b("STATIC_FILTER", True),
+        static_min_frames=_i("STATIC_MIN_FRAMES", 20),
+        static_pixel_eps=_f("STATIC_PIXEL_EPS", 2.5),
+        static_match_iou=_f("STATIC_MATCH_IOU", 0.85),
+        expected_occupant=_env("EXPECTED_OCCUPANT", "").strip(),
         vision_backend=_env("VISION_BACKEND", "gemini").strip().lower(),
         gemini_api_key=_env("GEMINI_API_KEY", ""),
         gemini_model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),

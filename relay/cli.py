@@ -84,15 +84,26 @@ def _build_pipeline(args, cfg, store, mode: str):
     from .detect.zones import ZoneModel
     from .enrich import enrich_and_store
     from .pipeline import Pipeline
+    from .reliability import ChaosConfig
+    from .vision import get_backend
+    from .vision.stage import VisionStage
 
     zones = ZoneModel(cfg)
     log.info("zones: %s", zones.describe())
+
+    chaos = ChaosConfig(args.chaos) if args.chaos else ChaosConfig()
+    backend = get_backend(cfg, chaos)
+    vision = VisionStage(backend, cfg, chaos)
+    log.info("vision backend: %s (timeout %.0fs, %d attempts, min interval %.1fs)",
+             vision.name, cfg.vision_timeout_s, cfg.retry_attempts, cfg.vision_min_interval_s)
+
     pipe = Pipeline(
         cfg, store, mode=mode, show=args.show, max_seconds=args.max_seconds, chaos=args.chaos,
         detector=YoloPersonDetector(cfg, zones=zones),
         state_machine=PostStateMachine(cfg),
         enricher=enrich_and_store,
     )
+    pipe.vision = vision
     return pipe
 
 

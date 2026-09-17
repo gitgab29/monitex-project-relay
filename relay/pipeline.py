@@ -84,6 +84,8 @@ class Pipeline:
         self._latest_render: dict = {}
         self._render_lock = threading.Lock()
         self._last_obs: Observation | None = None
+        #: Set by the CLI after construction; None means template summaries only.
+        self.vision = None
 
     # ------------------------------------------------------------------ entry points
 

@@ -48,7 +48,7 @@ function Get-Status {
     # Is the dashboard already up?
     $api = 'not running'
     try {
-        $r = Invoke-WebRequest -Uri "http://localhost:$Port/health" -TimeoutSec 2 -UseBasicParsing
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2 -UseBasicParsing
         if ($r.StatusCode -eq 200) { $api = "running on :$Port" }
     } catch { }
 
@@ -91,9 +91,12 @@ function Show-Menu {
     Write-Host ''
 }
 
-function Start-InNewWindow ([string]$Title, [string]$Exe, [string[]]$Args) {
+function Start-InNewWindow ([string]$Title, [string]$Exe, [string[]]$ArgList) {
+    # NOT named $Args: that is an automatic variable in PowerShell, so a parameter of that
+    # name never binds and the callee silently receives nothing. That bug launched `relay`
+    # with no subcommand at all.
     # -NoExit so the window stays open and you can read what happened.
-    $argLine = ($Args | ForEach-Object { if ($_ -match '\s') { "'$_'" } else { $_ } }) -join ' '
+    $argLine = ($ArgList | ForEach-Object { if ($_ -match '\s') { "'$_'" } else { $_ } }) -join ' '
     $cmd = "`$host.UI.RawUI.WindowTitle='$Title'; & '$Exe' $argLine"
     Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-Command', $cmd
 }
@@ -136,12 +139,16 @@ while ($true) {
         '1' {
             Start-InNewWindow 'RELAY - dashboard' $Relay @('api', '--port', "$Port")
             Write-Host ''
-            Write-Host '  starting the dashboard...' -ForegroundColor DarkGray
+            Write-Host '  starting the dashboard (first start takes ~10-20s)...' -ForegroundColor DarkGray
+            # 30s, not 6s: `relay api` pulls the whole package in on import, and a short poll
+            # reported failure while the server was in fact starting perfectly well.
+            # 127.0.0.1 rather than localhost so a machine that resolves localhost to ::1
+            # first does not spend the whole budget failing on IPv6.
             $up = $false
-            foreach ($i in 1..15) {
-                Start-Sleep -Milliseconds 400
+            foreach ($i in 1..60) {
+                Start-Sleep -Milliseconds 500
                 try {
-                    $r = Invoke-WebRequest -Uri "http://localhost:$Port/health" -TimeoutSec 2 -UseBasicParsing
+                    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2 -UseBasicParsing
                     if ($r.StatusCode -eq 200) { $up = $true; break }
                 } catch { }
             }

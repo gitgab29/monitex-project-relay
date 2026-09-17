@@ -1,0 +1,15 @@
+{
+  "event_id": "8f2a1c4e9b7d3a60",
+  "source_type": "video_event",
+  "source_file": "data/sessions/2026-09-17_site-118_reception.mp4",
+  "category": "intrusion",
+  "priority": "high",
+  "observed": "unidentified_person_at_post",
+  "video_ts": "00:04:12.40",
+  "site_id": "site-118",
+  "summary": "A person not matching the on-duty guard is seated at the reception post; the assigned guard has not been visible for 3 minutes.",
+  "confidence": 0.91,
+  "needs_review": false,
+  "review_reasons": [],
+  "review_link": "http://localhost:8080/review/8f2a1c4e9b7d3a60"
+}

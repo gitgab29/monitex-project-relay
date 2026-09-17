@@ -1,0 +1,19 @@
+{
+  "event_id": "3d5b8e07a1c26f94",
+  "source_type": "video_event",
+  "source_file": "data/sessions/2026-09-17_site-118_reception.mp4",
+  "category": "loitering",
+  "priority": "medium",
+  "observed": "person_loitering_near_entry",
+  "video_ts": "00:11:57.08",
+  "site_id": null,
+  "summary": "Someone has remained in the approach zone for over 90 seconds without entering; lighting is dim and the figure is partly out of frame.",
+  "confidence": 0.41,
+  "needs_review": true,
+  "review_reasons": [
+    "low_confidence",
+    "missing_site_id",
+    "poor_lighting"
+  ],
+  "review_link": "http://localhost:8080/review/3d5b8e07a1c26f94"
+}

@@ -89,23 +89,43 @@ class CameraProcess:
             )
             self._started_at = time.time()
 
-            # Starting is not the same as running. The camera opens, the model loads and YOLO
-            # warms up in the first few seconds, and that is exactly where it fails -- a
-            # camera index that no longer exists, or another app holding the device. Watch
-            # for long enough to catch that, and report the real reason instead of a pid.
-            deadline = time.time() + 12.0
-            while time.time() < deadline:
-                time.sleep(0.4)
+            # Wait only long enough to catch a process that refuses to start at all, then
+            # answer. The previous version blocked for the full startup -- camera open plus
+            # a YOLO warm-up, twelve seconds or so -- and in the browser that is
+            # indistinguishable from a dead button. People press it, see nothing, and
+            # conclude it is broken, which is exactly what happened.
+            for _ in range(6):
+                time.sleep(0.25)
                 if self._proc.poll() is not None:
-                    err = self.tail(25).strip()
-                    self.last_error = err or f"exited with code {self._proc.returncode}"
-                    self._proc, self._started_at = None, None
-                    log.error("the camera process died during startup: %s", err)
-                    raise HTTPException(500, self.last_error)
-                if "run " in self.tail(6) and "analysing every" in self.tail(6):
-                    break  # it reached the main loop
+                    raise HTTPException(500, self._died())
 
+            # The rest of the startup is watched in the background. The page polls status
+            # every three seconds, so a later failure still surfaces -- just not by holding
+            # the request open while it might happen.
+            threading.Thread(target=self._watch_startup, args=(self._proc,),
+                             name="camera-watch", daemon=True).start()
             return self.status()
+
+    def _died(self) -> str:
+        """Record and return why the child stopped. Called with the lock held."""
+        code = self._proc.returncode if self._proc else None
+        err = self.tail(25).strip()
+        self.last_error = err or f"the camera process exited with code {code}"
+        self._proc, self._started_at = None, None
+        log.error("the camera process died: %s", self.last_error)
+        return self.last_error
+
+    def _watch_startup(self, proc: subprocess.Popen) -> None:
+        """Catch a death during the slow part of startup, after the request has been answered."""
+        deadline = time.time() + 40.0
+        while time.time() < deadline:
+            time.sleep(0.5)
+            if proc.poll() is None:
+                continue
+            with self._lock:
+                if self._proc is proc:  # not a stop() we asked for
+                    self._died()
+            return
 
     def stop(self) -> dict:
         with self._lock:

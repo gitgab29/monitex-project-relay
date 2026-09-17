@@ -121,7 +121,22 @@ def test_stopping_a_camera_that_is_not_running_is_an_error_not_a_crash(cfg):
 
 
 def test_status_of_an_idle_camera(cfg):
-    assert CameraProcess(cfg).status() == {"running": False, "pid": None, "uptime_s": None}
+    assert CameraProcess(cfg).status() == {
+        "running": False, "pid": None, "uptime_s": None, "last_error": None}
+
+
+def test_a_failed_start_is_remembered_so_the_page_can_say_why(cfg):
+    """The bug this guards: the camera index vanished across a reboot, the child process died
+    two seconds in, and the page reported 'running' with a pid. A start that reports success
+    for a process that is already dead is worse than one that fails loudly."""
+    cam = CameraProcess(cfg)
+    assert cam.status()["last_error"] is None
+    cam.last_error = "could not open camera index 1"
+    assert "camera index" in cam.status()["last_error"]
+
+
+def test_tail_of_a_missing_log_is_empty_not_an_explosion(cfg):
+    assert CameraProcess(cfg).tail() == ""
 
 
 # ------------------------------------------------------------------ the feed

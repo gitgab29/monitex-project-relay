@@ -60,17 +60,51 @@ class WebcamSource:
     That consistency matters more here than absolute accuracy.
     """
 
+    #: Probed, in order, when the configured index will not open.
+    PROBE_RANGE = (0, 1, 2, 3)
+
+    @staticmethod
+    def _try_open(index: int):
+        """DirectShow first, then whatever OpenCV picks. Returns an opened capture or None."""
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(index)
+        if not cap.isOpened():
+            cap.release()
+            return None
+        return cap
+
     def __init__(self, index: int, width: int = 1280, height: int = 720, nominal_fps: float = 30.0):
+        self.cap = self._try_open(index)
         self.index = index
-        self.cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-        if not self.cap.isOpened():
-            self.cap.release()
-            self.cap = cv2.VideoCapture(index)
-        if not self.cap.isOpened():
+
+        if self.cap is None:
+            # Camera indices are not stable across reboots, replugs or a docking station:
+            # the index that worked this morning can simply not exist this afternoon. Failing
+            # here would be technically correct and useless, so probe for a camera that does
+            # work and say loudly which one was used.
+            for candidate in self.PROBE_RANGE:
+                if candidate == index:
+                    continue
+                cap = self._try_open(candidate)
+                if cap is not None:
+                    log.warning(
+                        "CAMERA_INDEX=%d would not open, but index %d did -- using it. "
+                        "Indices move between reboots; set CAMERA_INDEX=%d in .env to make "
+                        "this stick.", index, candidate, candidate,
+                    )
+                    self.cap, self.index = cap, candidate
+                    break
+
+        if self.cap is None:
             raise RuntimeError(
-                f"could not open camera index {index}. Another app may hold it "
-                f"(Teams/Zoom), or try a different CAMERA_INDEX."
+                f"could not open camera index {index}, and no camera was found at "
+                f"{', '.join(str(i) for i in self.PROBE_RANGE)} either. Another app may hold "
+                f"it (Teams/Zoom/Discord), or the camera is unplugged or disabled in "
+                f"Windows privacy settings."
             )
+        index = self.index
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or width

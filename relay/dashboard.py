@@ -44,6 +44,8 @@ class CameraProcess:
         self._proc: subprocess.Popen | None = None
         self._started_at: float | None = None
         self._lock = threading.Lock()
+        self.log_path = cfg.logs_dir / "camera.log"
+        self.last_error: str | None = None
 
     @property
     def running(self) -> bool:
@@ -55,7 +57,14 @@ class CameraProcess:
             "pid": self._proc.pid if self.running else None,
             "uptime_s": round(time.time() - self._started_at, 1)
             if (self.running and self._started_at) else None,
+            "last_error": self.last_error,
         }
+
+    def tail(self, lines: int = 40) -> str:
+        try:
+            return "".join(self.log_path.read_text(errors="replace").splitlines(True)[-lines:])
+        except OSError:
+            return ""
 
     def start(self, *, show: bool = True) -> dict:
         with self._lock:
@@ -66,13 +75,36 @@ class CameraProcess:
             if show:
                 argv.append("--show")
             log.info("dashboard starting the camera: %s", " ".join(argv))
-            creation = 0
-            if sys.platform == "win32":
-                # Its own console, so the overlay window and its log are visible on screen and
-                # a Ctrl-C in the server does not take the camera down with it.
-                creation = subprocess.CREATE_NEW_CONSOLE
-            self._proc = subprocess.Popen(argv, cwd=str(Path.cwd()), creationflags=creation)
+            self.last_error = None
+            self.cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+
+            # Output goes to a FILE, not to a new console window. A console dies with the
+            # process, so when the camera failed to open, the error flashed up and vanished
+            # and the page cheerfully reported "running" -- the worst of both worlds. A file
+            # survives the process and can be shown in the page.
+            self._logfile = open(self.log_path, "w", encoding="utf-8", errors="replace")
+            self._proc = subprocess.Popen(
+                argv, cwd=str(Path.cwd()),
+                stdout=self._logfile, stderr=subprocess.STDOUT,
+            )
             self._started_at = time.time()
+
+            # Starting is not the same as running. The camera opens, the model loads and YOLO
+            # warms up in the first few seconds, and that is exactly where it fails -- a
+            # camera index that no longer exists, or another app holding the device. Watch
+            # for long enough to catch that, and report the real reason instead of a pid.
+            deadline = time.time() + 12.0
+            while time.time() < deadline:
+                time.sleep(0.4)
+                if self._proc.poll() is not None:
+                    err = self.tail(25).strip()
+                    self.last_error = err or f"exited with code {self._proc.returncode}"
+                    self._proc, self._started_at = None, None
+                    log.error("the camera process died during startup: %s", err)
+                    raise HTTPException(500, self.last_error)
+                if "run " in self.tail(6) and "analysing every" in self.tail(6):
+                    break  # it reached the main loop
+
             return self.status()
 
     def stop(self) -> dict:
@@ -145,6 +177,10 @@ def build_router(cfg: Settings, store: Store) -> APIRouter:
     @router.post("/control/start")
     def control_start(show: bool = True) -> dict:
         return camera.start(show=show)
+
+    @router.get("/control/log")
+    def control_log(lines: int = 40) -> dict:
+        return {"log": camera.tail(lines)}
 
     @router.post("/control/stop")
     def control_stop() -> dict:
@@ -260,6 +296,7 @@ button.stop{background:var(--bad);color:#2a0709;border-color:transparent;font-we
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:.45rem}
 .live{background:var(--ok);box-shadow:0 0 0 4px rgba(92,201,140,.18)}
 .off{background:#4b525c}
+.fail{background:var(--bad);box-shadow:0 0 0 4px rgba(226,104,107,.18)}
 .shell{display:grid;grid-template-columns:1fr 330px;gap:1.25rem;padding:1.25rem;
         max-width:1500px;margin:0 auto;align-items:start}
 @media(max-width:1000px){.shell{grid-template-columns:1fr}}
@@ -362,7 +399,12 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 
 async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 async function jpost(u){ const r = await fetch(u,{method:'POST'});
-  if(!r.ok){ const t = await r.text(); alert(t); throw new Error(t);} return r.json(); }
+  if(!r.ok){
+    let t = await r.text();
+    try { t = JSON.parse(t).detail ?? t; } catch(_) {}
+    throw new Error(t);
+  }
+  return r.json(); }
 
 function tile(n,label,cls){ return `<div class="tile ${cls||''}"><b>${n}</b><span>${label}</span></div>`; }
 
@@ -385,6 +427,13 @@ function card(e){
     <div class=act><button onclick="showEmail('${e.event_id}')">✉ the email</button></div>
   </div></div>`;
 }
+
+window.showCamLog = async () => {
+  const r = await jget('/control/log?lines=60');
+  $('#modalbody').innerHTML = `<div class=kv><b>Camera log</b> (data/logs/camera.log)</div>
+    <pre>${esc(r.log || 'empty')}</pre><button onclick="modal.close()">Close</button>`;
+  modal.showModal();
+};
 
 window.zoom = id => {
   $('#modalbody').innerHTML = `<img src="/evidence/${id}.jpg">
@@ -445,14 +494,33 @@ function render(d){
   const on = d.camera.running;
   $('#camstate').innerHTML = on
     ? `<span class="dot live"></span>camera live &middot; ${d.camera.uptime_s}s`
-    : `<span class="dot off"></span>camera off`;
+    : (d.camera.last_error
+        ? `<span class="dot fail"></span><span style="color:#ff9a9c;cursor:pointer"
+             title="click for the full log" onclick="showCamLog()">camera failed to start</span>`
+        : `<span class="dot off"></span>camera off`);
   $('#start').disabled = on;
   $('#stop').disabled  = !on;
 }
 
 async function tick(){ try{ render(await jget('/api/feed')); }catch(e){ console.error(e); } }
 
-$('#start').onclick = async () => { $('#start').disabled = true; await jpost('/control/start'); setTimeout(tick,600); };
+$('#start').onclick = async () => {
+  const b = $('#start'); b.disabled = true; const was = b.textContent;
+  b.textContent = 'starting…';
+  try {
+    await jpost('/control/start');
+  } catch(e) {
+    // Show WHY. The camera opens and YOLO warms up during these first seconds, and that is
+    // where it fails -- a camera index that vanished across a reboot, or another app holding
+    // the device. A button that just goes quiet sends you hunting through terminals.
+    $('#modalbody').innerHTML = `<div class=kv><b>The camera did not start.</b></div>
+      <pre>${esc(String(e.message||e))}</pre>
+      <div class=kv>If it mentions a camera index: the index moves between reboots and
+      unplugs. Set CAMERA_INDEX in .env, or just try again — it now probes 0–3 automatically.</div>
+      <button onclick="modal.close()">Close</button>`;
+    modal.showModal();
+  } finally { b.textContent = was; tick(); }
+};
 $('#stop').onclick  = async () => { $('#stop').disabled  = true; await jpost('/control/stop');  setTimeout(tick,600); };
 $('#refresh').onclick = tick;
 
@@ -464,7 +532,7 @@ Recorded videos in data/sessions are NOT touched.
 This cannot be undone.')) return;
   $('#wipe').disabled = true;
   try{
-    const r = await jpost('/control/wipe');
+    const r = await jpost('/control/wipe').catch(e=>{ alert(e.message); throw e; });
     const n = r.removed;
     alert('Wiped.
 

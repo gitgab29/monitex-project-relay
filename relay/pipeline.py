@@ -178,7 +178,7 @@ class Pipeline:
             status = "interrupted"
         finally:
             self._stop.set()
-            worker.join(timeout=30)
+            worker.join(timeout=self._drain_timeout_s())
             window.close()
             src.release()
             if recorder is not None:
@@ -265,6 +265,27 @@ class Pipeline:
         )
 
     # ------------------------------------------------------------------ bookkeeping
+
+    def _drain_timeout_s(self) -> float:
+        """How long to let an in-flight vision call finish after the source ends.
+
+        This used to be a flat 30 s, which was quietly shorter than the worst case it had to
+        cover. A vision call that keeps timing out costs `vision_timeout_s` per attempt plus
+        backoff between them -- at the defaults, 12 s x 3 + 1 s + 2 s = 39 s. So the join
+        expired mid-retry, the worker was abandoned, and the event shipped WITHOUT its
+        `vision_timeout` reason and WITHOUT its dead-letter row: the degrade path ran and then
+        lost its own evidence. `--chaos timeout` on a short clip showed the backoff and then
+        silently swallowed the ending.
+
+        Deriving it from the retry budget means the two cannot drift apart again. The +5 s is
+        for the encode and the store write after the last attempt.
+        """
+        cfg = self.cfg
+        attempts = max(1, cfg.retry_attempts)
+        backoff = sum(
+            min(cfg.retry_cap_s, cfg.retry_base_s * (2 ** n)) for n in range(attempts - 1)
+        )
+        return attempts * cfg.vision_timeout_s + backoff + 5.0
 
     def _finish_states(self) -> None:
         """An occurrence still running when the video ends is still an occurrence; close it

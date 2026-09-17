@@ -46,6 +46,20 @@ class Router:
             return DeliveryResult.skipped()
 
         link = self.review_link(event)
+
+        if self.primary is None and self.fallback is None:
+            # Nothing is configured, so nothing was attempted and nothing failed. This is the
+            # keyless clean-checkout path -- a reviewer's first run -- and it must not look
+            # like a fault or fill the dead-letter table with noise. A dead letter means "we
+            # tried and could not", not "you have not set this up yet".
+            log.info(
+                "event %s would have been notified (%s/%s) but no sink is configured -- "
+                "set N8N_WEBHOOK_URL, or SMTP_USER/SMTP_APP_PASSWORD/ALERT_TO, or "
+                "WEBHOOK_FALLBACK_URL in .env",
+                event.event_id, event.category, event.priority,
+            )
+            return DeliveryResult(ok=True, channel="none", status="none")
+
         if self.primary is not None:
             result = self.primary.deliver(event, review_link=link, reasons=reasons)
             if result.ok:

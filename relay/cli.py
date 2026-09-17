@@ -85,6 +85,7 @@ def _build_pipeline(args, cfg, store, mode: str):
     from .enrich import enrich_and_store
     from .pipeline import Pipeline
     from .reliability import ChaosConfig
+    from .router import build_router
     from .vision import get_backend
     from .vision.stage import VisionStage
 
@@ -97,11 +98,18 @@ def _build_pipeline(args, cfg, store, mode: str):
     log.info("vision backend: %s (timeout %.0fs, %d attempts, min interval %.1fs)",
              vision.name, cfg.vision_timeout_s, cfg.retry_attempts, cfg.vision_min_interval_s)
 
+    router = build_router(cfg, store, use_n8n=not args.no_n8n, chaos=chaos)
+    log.info(
+        "notifications: primary=%s fallback=%s",
+        getattr(router.primary, "name", "none"), getattr(router.fallback, "name", "none"),
+    )
+
     pipe = Pipeline(
         cfg, store, mode=mode, show=args.show, max_seconds=args.max_seconds, chaos=args.chaos,
         detector=YoloPersonDetector(cfg, zones=zones),
         state_machine=PostStateMachine(cfg),
         enricher=enrich_and_store,
+        router=router,
     )
     pipe.vision = vision
     return pipe

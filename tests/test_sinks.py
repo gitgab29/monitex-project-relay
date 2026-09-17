@@ -131,14 +131,6 @@ def test_both_sinks_failing_still_records_everything(cfg, store):
     assert len(store.list_dead_letters()) == 2      # one per sink that failed
 
 
-def test_no_sinks_at_all_does_not_crash_a_run(cfg, store):
-    """A reviewer with no n8n, no SMTP and no webhook must still get a working pipeline."""
-    result = Router(cfg, store, primary=None, fallback=None).route(
-        event(priority=Priority.high), reasons=[]
-    )
-    assert result.ok is False and result.status == "failed"
-
-
 # ---------------------------------------------------------------- message formatting
 
 def test_the_subject_leads_with_the_site_and_the_severity():
@@ -190,3 +182,22 @@ def test_unconfigured_smtp_reports_a_config_state_not_a_delivery_failure(cfg, st
     result = SmtpEmailSink(cfg).deliver(event())
     assert result.ok is False and result.error == "smtp_not_configured"
     assert result.status == "none"
+
+
+def test_no_sink_configured_is_a_config_state_not_a_failure(cfg, store):
+    """The keyless clean-checkout path is a reviewer's FIRST run. It must not print an error
+    or fill the dead-letter table: a dead letter means "we tried and could not", not "you
+    have not set this up yet"."""
+    result = Router(cfg, store, primary=None, fallback=None).route(
+        event(priority=Priority.high), reasons=[]
+    )
+    assert result.ok is True and result.status == "none"
+    assert store.list_dead_letters() == []
+
+
+def test_a_configured_sink_that_fails_still_dead_letters(cfg, store):
+    """The other side of the same distinction."""
+    Router(cfg, store, primary=RecordingSink("n8n", ok=False)).route(
+        event(priority=Priority.high), reasons=[]
+    )
+    assert len(store.list_dead_letters()) == 1

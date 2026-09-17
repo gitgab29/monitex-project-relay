@@ -1,0 +1,23 @@
+# Local n8n for Project Relay.
+#   docker compose up -d   ->   http://localhost:5678
+# n8n reaches the Python API (relay api, port 8080) at http://host.docker.internal:8080,
+# which is what extra_hosts guarantees on Linux and is native on Docker Desktop.
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: relay-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Manila
+      - N8N_SECURE_COOKIE=false          # plain http on localhost
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

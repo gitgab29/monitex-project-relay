@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+.env.local
+
+# Runtime data: SQLite db, session recordings, logs
+data/
+
+# YOLO weights (auto-downloaded on first run)
+*.pt
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

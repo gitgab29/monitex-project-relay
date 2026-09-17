@@ -139,6 +139,10 @@ class Settings:
     # sinks
     n8n_webhook_url: str = "http://localhost:5678/webhook/relay-event"
     n8n_timeout_s: float = 10.0
+    #: Separate, short CONNECT budget. If n8n is up, connecting is instant; if it is
+    #: not, Windows retries the SYN and a refusal can take seconds -- which is pure
+    #: delay in front of the fallback that was always going to deliver the alert.
+    n8n_connect_timeout_s: float = 1.0
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
@@ -279,6 +283,7 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env", *, override:
         retry_cap_s=_f("RETRY_CAP_S", 8.0),
         n8n_webhook_url=_env("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/relay-event"),
         n8n_timeout_s=_f("N8N_TIMEOUT_S", 10.0),
+        n8n_connect_timeout_s=_f("N8N_CONNECT_TIMEOUT_S", 1.0),
         smtp_host=_env("SMTP_HOST", "smtp.gmail.com"),
         smtp_port=_i("SMTP_PORT", 587),
         smtp_user=_env("SMTP_USER", ""),

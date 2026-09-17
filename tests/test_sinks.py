@@ -214,3 +214,67 @@ def test_a_configured_sink_that_fails_still_dead_letters(cfg, store):
         event(priority=Priority.high), reasons=[]
     )
     assert len(store.list_dead_letters()) == 1
+
+
+# ---------------------------------------------------------------- failing fast
+
+def test_a_refused_connection_is_not_retried(cfg, monkeypatch):
+    """Nineteen seconds passed between an event and its email, almost all of it backing off
+    from a port with nothing behind it. A refused connection is not a transient fault: it is
+    an answer, and waiting does not change it."""
+    import httpx
+
+    from relay.sinks.n8n import N8nWebhookSink
+
+    calls = {"n": 0}
+
+    def refuse(*a, **k):
+        calls["n"] += 1
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", refuse)
+    cfg_n8n = Settings(site_id="site-118", retry_attempts=3, retry_base_s=5.0, retry_cap_s=5.0,
+                       n8n_webhook_url="http://localhost:5678/webhook/relay-event")
+    result = N8nWebhookSink(cfg_n8n).deliver(event(priority=Priority.high))
+
+    assert result.ok is False
+    assert calls["n"] == 1, f"tried {calls['n']} times; a refusal must be tried exactly once"
+
+
+def test_a_timeout_is_still_retried(cfg, monkeypatch):
+    """The opposite case, so failing fast does not quietly become never trying: a timeout may
+    well succeed on the next attempt, and must still get its full budget."""
+    import httpx
+
+    from relay.sinks.n8n import N8nWebhookSink
+
+    calls = {"n": 0}
+
+    def slow(*a, **k):
+        calls["n"] += 1
+        raise httpx.TimeoutException("too slow")
+
+    monkeypatch.setattr(httpx, "post", slow)
+    cfg_n8n = Settings(site_id="site-118", retry_attempts=3, retry_base_s=0.001,
+                       retry_cap_s=0.01,
+                       n8n_webhook_url="http://localhost:5678/webhook/relay-event")
+    N8nWebhookSink(cfg_n8n).deliver(event(priority=Priority.high))
+    assert calls["n"] == 3
+
+
+def test_give_up_on_takes_precedence_over_retry_on():
+    """ConnectError is a subclass of TransportError, so the two lists overlap on purpose."""
+    import httpx
+
+    from relay.reliability import retry
+
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(httpx.ConnectError):
+        retry(boom, attempts=5, base=0.001, cap=0.01,
+              retry_on=(httpx.TransportError,), give_up_on=(httpx.ConnectError,))
+    assert calls["n"] == 1

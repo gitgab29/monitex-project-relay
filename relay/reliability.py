@@ -59,6 +59,7 @@ def backoff_delay(attempt: int, base: float = 1.0, cap: float = 8.0, jitter: flo
 def retry(
     fn: Callable[[], T], *, attempts: int = 3, base: float = 1.0, cap: float = 8.0,
     retry_on: tuple[type[BaseException], ...] = (Exception,),
+    give_up_on: tuple[type[BaseException], ...] = (),
     on_attempt: Callable[[int, BaseException, float], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> T:
@@ -66,11 +67,20 @@ def retry(
 
     Re-raises the LAST exception rather than a wrapper, so the caller can still tell a timeout
     from a rate limit and record the right thing in the dead-letter row.
+
+    `give_up_on` names the failures that will not improve by waiting. A refused connection is
+    the clearest case: nothing is listening on that port, and it will still not be listening
+    1.4 seconds from now. Backing off from it only delays the fallback that was always going
+    to handle it -- which cost about nineteen seconds per alert here, almost all of it spent
+    politely waiting to be refused again.
     """
     last: BaseException | None = None
     for attempt in range(1, attempts + 1):
         try:
             return fn()
+        except give_up_on as e:
+            log.info("not retrying %s: waiting will not change it", type(e).__name__)
+            raise
         except retry_on as e:
             last = e
             if attempt == attempts:

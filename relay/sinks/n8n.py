@@ -49,7 +49,10 @@ class N8nWebhookSink:
             self.calls += 1
             if self.chaos.mode == "sink-fail" and self.chaos.active_for(self.calls):
                 raise SinkFailure("injected sink failure")
-            r = httpx.post(self.cfg.n8n_webhook_url, json=payload, timeout=self.cfg.n8n_timeout_s)
+            timeout = httpx.Timeout(
+                self.cfg.n8n_timeout_s, connect=self.cfg.n8n_connect_timeout_s
+            )
+            r = httpx.post(self.cfg.n8n_webhook_url, json=payload, timeout=timeout)
             if r.status_code >= 300:
                 raise SinkFailure(f"n8n returned {r.status_code}: {r.text[:200]}")
             return r
@@ -59,6 +62,14 @@ class N8nWebhookSink:
                 post, attempts=self.cfg.retry_attempts, base=self.cfg.retry_base_s,
                 cap=self.cfg.retry_cap_s,
                 retry_on=(httpx.TransportError, httpx.TimeoutException, SinkFailure),
+                # Nothing is listening, and three rounds of backoff will not change that.
+                # Falling straight through to the next sink is what gets the alert out.
+                #
+                # ConnectTimeout is here for a reason worth remembering: capping the connect
+                # budget turned a fast ConnectError into a ConnectTimeout, which is a
+                # *timeout* and so was retryable -- the "speed-up" made this leg slower than
+                # before it. Failing to connect is failing to connect however it is spelled.
+                give_up_on=(httpx.ConnectError, httpx.ConnectTimeout),
                 on_attempt=lambda n, e, d: log.warning(
                     "n8n attempt %d/%d failed: %s; sleeping %.2fs",
                     n, self.cfg.retry_attempts, e, d

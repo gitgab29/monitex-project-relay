@@ -1,0 +1,507 @@
+{
+  "name": "relay_router",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        320
+      ],
+      "webhookId": "relay-event-webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "relay-event",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Route fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        320
+      ],
+      "notes": "THE ONE FIELD TO CHANGE: api_base. Use http://localhost:8080 for `npx n8n` on the host, http://host.docker.internal:8080 for n8n in Docker. Or set RELAY_API_BASE and leave this alone.",
+      "notesInFlow": true,
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "api_base",
+              "value": "={{ $env.RELAY_API_BASE || 'http://localhost:8080' }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "event_id",
+              "value": "={{ $json.body.event_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "site_id",
+              "value": "={{ $json.body.site_id }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "observed",
+              "value": "={{ $json.body.observed }}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "video_ts",
+              "value": "={{ $json.body.video_ts }}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "source_file",
+              "value": "={{ $json.body.source_file }}",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "category",
+              "value": "={{ $json.body.category }}",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "priority",
+              "value": "={{ $json.body.priority }}",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "summary",
+              "value": "={{ $json.body.summary }}",
+              "type": "string"
+            },
+            {
+              "id": "a10",
+              "name": "confidence",
+              "value": "={{ $json.body.confidence }}",
+              "type": "number"
+            },
+            {
+              "id": "a11",
+              "name": "needs_review",
+              "value": "={{ $json.body.needs_review }}",
+              "type": "boolean"
+            },
+            {
+              "id": "a12",
+              "name": "review_reasons",
+              "value": "={{ $json.body.review_reasons || [] }}",
+              "type": "array"
+            },
+            {
+              "id": "a13",
+              "name": "review_link",
+              "value": "={{ $json.body.review_link }}",
+              "type": "string"
+            },
+            {
+              "id": "a14",
+              "name": "event",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "a15",
+              "name": "subject_high",
+              "value": "=[{{ $json.body.site_id }}] HIGH: {{ $json.body.observed }} at {{ $json.body.video_ts }}",
+              "type": "string"
+            },
+            {
+              "id": "a16",
+              "name": "subject_review",
+              "value": "=[{{ $json.body.site_id }}] REVIEW NEEDED: {{ $json.body.observed }} ({{ $json.body.confidence }})",
+              "type": "string"
+            },
+            {
+              "id": "a17",
+              "name": "body",
+              "value": "={{ $json.summary }}\n\nSite:         {{ $json.site_id }}\nObserved:     {{ $json.observed }}\nAt:           {{ $json.video_ts }}  (offset into {{ $json.source_file }})\nCategory:     {{ $json.category }}\nPriority:     {{ $json.priority }}\nConfidence:   {{ $json.confidence }}\nNeeds review: {{ $json.needs_review }}\nReasons:      {{ ($json.review_reasons || []).join(', ') || 'none' }}\n\nReview this event: {{ $json.review_link }}\n\n--- full event ---\n{{ JSON.stringify($json.event, null, 2) }}\n",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        460,
+        320
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1",
+                    "leftValue": "={{ $json.needs_review }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c2",
+                    "leftValue": "={{ $json.priority }}",
+                    "rightValue": "high",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "high"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c3",
+                    "leftValue": "={{ $json.priority }}",
+                    "rightValue": "medium",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "medium"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "routine"
+        }
+      }
+    },
+    {
+      "id": "n4a",
+      "name": "Send review email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "fromEmail": "={{ $env.ALERT_FROM || $env.SMTP_USER || 'relay@localhost' }}",
+        "toEmail": "={{ $env.ALERT_TO || 'alerts@example.com' }}",
+        "subject": "={{ $json.subject_review }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n4b",
+      "name": "Send high-priority email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "fromEmail": "={{ $env.ALERT_FROM || $env.SMTP_USER || 'relay@localhost' }}",
+        "toEmail": "={{ $env.ALERT_TO || 'alerts@example.com' }}",
+        "subject": "={{ $json.subject_high }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n4c",
+      "name": "Medium - stored only",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        720,
+        440
+      ],
+      "parameters": {},
+      "notes": "Persisted by Python already; the digest picks it up.",
+      "notesInFlow": true
+    },
+    {
+      "id": "n4d",
+      "name": "Routine - stored only",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        720,
+        580
+      ],
+      "parameters": {},
+      "notes": "Low / routine: store only, nobody is paged.",
+      "notesInFlow": true
+    },
+    {
+      "id": "n5",
+      "name": "Mark notified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        120
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Route fields').item.json.api_base }}/events/{{ $('Route fields').item.json.event_id }}/notified",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: 'email', ok: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n5e",
+      "name": "Post dead letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        320
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Route fields').item.json.api_base }}/dead-letter",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $('Route fields').item.json.event_id, stage: 'email', error: String($json.error || $json.message || 'email send failed'), payload: $('Route fields').item.json.event, attempts: 3 }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1240,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, event_id: $('Route fields').item.json.event_id }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route fields": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Send review email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send high-priority email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Medium - stored only",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Routine - stored only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send review email": {
+      "main": [
+        [
+          {
+            "node": "Mark notified",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post dead letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send high-priority email": {
+      "main": [
+        [
+          {
+            "node": "Mark notified",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post dead letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Medium - stored only": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routine - stored only": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark notified": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post dead letter": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": [
+    {
+      "name": "relay"
+    }
+  ]
+}

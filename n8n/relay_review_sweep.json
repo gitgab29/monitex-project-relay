@@ -1,0 +1,230 @@
+{
+  "name": "relay_review_sweep",
+  "nodes": [
+    {
+      "id": "s1",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s2",
+      "name": "Sweep config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "notes": "THE ONE FIELD TO CHANGE: api_base. http://localhost:8080 for `npx n8n` on the host, http://host.docker.internal:8080 for n8n in Docker. Or set RELAY_API_BASE.",
+      "notesInFlow": true,
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "api_base",
+              "value": "={{ $env.RELAY_API_BASE || 'http://localhost:8080' }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s3",
+      "name": "Get resolved, unnotified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.api_base }}/review/resolved",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "unnotified",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "s4",
+      "name": "One item per event",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "resolved",
+        "options": {}
+      },
+      "notes": "GET /review/resolved returns {resolved: [...]}. Empty list = no items = the rest of the branch simply does not run.",
+      "notesInFlow": true
+    },
+    {
+      "id": "s5",
+      "name": "Send review-closed email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "fromEmail": "={{ $env.ALERT_FROM || $env.SMTP_USER || 'relay@localhost' }}",
+        "toEmail": "={{ $env.ALERT_TO || 'alerts@example.com' }}",
+        "subject": "=[{{ $json.site_id }}] Review closed: {{ $json.observed }} -> {{ $json.resolution }}",
+        "emailFormat": "text",
+        "text": "={{ $json.summary }}\n\nSite:       {{ $json.site_id }}\nObserved:   {{ $json.observed }}\nAt:         {{ $json.video_ts }}\nResolution: {{ $json.resolution }}\nResolved by: {{ $json.resolved_by }}\nNotes:      {{ $json.notes || 'none' }}\n\nThis review item is now closed. No further action is needed.\n",
+        "options": {}
+      }
+    },
+    {
+      "id": "s6",
+      "name": "Ack notified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        200
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Sweep config').first().json.api_base }}/review/{{ $('One item per event').item.json.event_id }}/ack-notified",
+        "options": {}
+      },
+      "notes": "Only acked AFTER the mail is away, so a failed send is retried next minute rather than silently lost.",
+      "notesInFlow": true
+    },
+    {
+      "id": "s7",
+      "name": "Post dead letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Sweep config').first().json.api_base }}/dead-letter",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $('One item per event').item.json.event_id, stage: 'review-closed-email', error: String($json.error || $json.message || 'email send failed'), payload: $('One item per event').item.json, attempts: 3 }) }}",
+        "options": {}
+      },
+      "notes": "NOT acked on this path: the row stays unnotified so the next sweep retries it.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Sweep config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sweep config": {
+      "main": [
+        [
+          {
+            "node": "Get resolved, unnotified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get resolved, unnotified": {
+      "main": [
+        [
+          {
+            "node": "One item per event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per event": {
+      "main": [
+        [
+          {
+            "node": "Send review-closed email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send review-closed email": {
+      "main": [
+        [
+          {
+            "node": "Ack notified",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post dead letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": [
+    {
+      "name": "relay"
+    }
+  ]
+}

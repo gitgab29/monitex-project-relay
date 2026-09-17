@@ -545,19 +545,16 @@ $('#stop').onclick  = async () => { $('#stop').disabled  = true; await jpost('/c
 $('#refresh').onclick = tick;
 
 $('#wipe').onclick = async () => {
-  if(!confirm('Delete EVERY event, review item, dead letter and evidence photo?
-
-Recorded videos in data/sessions are NOT touched.
-
-This cannot be undone.')) return;
+  const NL = String.fromCharCode(10);
+  if(!confirm('Delete EVERY event, review item, dead letter and evidence photo?' + NL + NL
+            + 'Recorded videos in data/sessions are NOT touched.' + NL + NL
+            + 'This cannot be undone.')) return;
   $('#wipe').disabled = true;
   try{
     const r = await jpost('/control/wipe').catch(e=>{ alert(e.message); throw e; });
     const n = r.removed;
-    alert('Wiped.
-
-' + Object.entries(n).filter(([,v])=>v>0).map(([k,v])=>`${v} ${k}`).join('
-') || 'Nothing to delete.');
+    const lines = Object.entries(n).filter(([,v])=>v>0).map(([k,v])=>v+' '+k);
+    alert(lines.length ? 'Wiped.' + NL + NL + lines.join(NL) : 'Nothing to delete.');
   } finally { $('#wipe').disabled = false; tick(); }
 };
 

@@ -53,6 +53,53 @@ def seed(store, n=3):
                       error="SMTP 535", payload={})
 
 
+# ------------------------------------------------------------------ the page itself
+
+def test_the_page_javascript_actually_parses():
+    """The bug this exists for: a stray literal newline inside a JS string. One broken string
+    kills the WHOLE <script> block, so every button on the page silently stops working -- not
+    just the one near the typo. The page still renders, the server still answers, every
+    endpoint still passes its own test, and nothing you click does anything.
+
+    Every server-side test passed while the page was completely dead, because they all tested
+    the API and none of them tested the page. Skipped when node is unavailable rather than
+    failing, since node is not a project dependency.
+    """
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from relay.dashboard import PAGE
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed; cannot syntax-check the page")
+
+    script = re.search(r"<script>(.*?)</script>", PAGE, re.S)
+    assert script, "the page has no <script> block"
+
+    with tempfile.TemporaryDirectory() as d:
+        js = Path(d) / "page.js"
+        js.write_text(script.group(1), encoding="utf-8")
+        r = subprocess.run([node, "--check", str(js)], capture_output=True, text=True)
+    assert r.returncode == 0, f"the dashboard's JavaScript does not parse:\n{r.stderr}"
+
+
+def test_the_page_has_no_raw_newline_inside_a_quoted_js_string():
+    """A cheap guard that works without node, aimed squarely at how the break got in: a
+    single-quoted string opened and never closed on the same line."""
+    from relay.dashboard import PAGE
+
+    for n, line in enumerate(PAGE.splitlines(), 1):
+        if line.count("'") % 2 and "//" not in line and not line.lstrip().startswith("*"):
+            # An odd number of quotes can be legitimate inside a template literal or a
+            # CSS/HTML attribute; only flag it where a JS call clearly opens one.
+            if any(k in line for k in ("confirm(", "alert(", "prompt(")):
+                raise AssertionError(f"line {n} opens a string it never closes: {line.strip()}")
+
+
 # ------------------------------------------------------------------ wipe
 
 def test_wipe_empties_every_operational_table(store):

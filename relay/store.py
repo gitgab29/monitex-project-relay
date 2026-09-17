@@ -471,6 +471,35 @@ class Store:
             "SELECT * FROM dead_letter ORDER BY last_failed_at DESC LIMIT ?", (limit,)
         ).fetchall()
 
+    # ------------------------------------------------------------------ housekeeping
+
+    #: Wiped by `wipe_all`, child-first so foreign keys never block a delete. `meta` is
+    #: excluded on purpose: it carries the schema version, and dropping it would make an
+    #: empty database look like one from an older build.
+    WIPEABLE = (
+        "review_queue", "dead_letter", "vision_calls",
+        "observations", "events", "runs", "sessions",
+    )
+
+    def wipe_all(self) -> dict[str, int]:
+        """Empty every operational table, and report what was removed.
+
+        Deletes ROWS rather than the file. Deleting `relay.db` while a process holds it open
+        fails silently on Windows -- you believe you have a clean slate, and the old events are
+        still there when you start recording. This cannot end up in that state, and it means
+        the running API keeps serving throughout.
+        """
+        removed: dict[str, int] = {}
+        with self.conn:
+            for table in self.WIPEABLE:
+                n = self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                self.conn.execute(f"DELETE FROM {table}")
+                removed[table] = n
+            # so the next session/run ids start from 1 again rather than continuing
+            self.conn.execute("DELETE FROM sqlite_sequence")
+        self.conn.execute("VACUUM")
+        return removed
+
     # ------------------------------------------------------------------ vision call metrics
 
     def log_vision_call(

@@ -105,6 +105,14 @@ def _reasons(raw) -> list[str]:
         return []
 
 
+def _subject_for(d: dict, cfg: Settings) -> str:
+    """The subject line as the sink would have written it, from the stored row."""
+    site = d.get("site_id") or "unknown-site"
+    if d.get("needs_review"):
+        return f"[{site}] REVIEW NEEDED: {d['observed']} ({float(d['confidence']):.2f})"
+    return f"[{site}] {str(d['priority']).upper()}: {d['observed']} at {d['video_ts']}"
+
+
 def _event_row(r, cfg: Settings) -> dict:
     d = dict(r)
     d["has_evidence"] = (cfg.evidence_dir / f"{d['event_id']}.jpg").exists()
@@ -142,6 +150,28 @@ def build_router(cfg: Settings, store: Store) -> APIRouter:
     def control_stop() -> dict:
         return camera.stop()
 
+    @router.post("/control/wipe")
+    def control_wipe() -> dict:
+        """Clear every event, review item, dead letter and evidence frame.
+
+        Refuses while the camera is running. Wiping the database out from under a live
+        pipeline would have it writing into tables that vanished mid-run, and the resulting
+        half-state is much harder to explain than a button that says no.
+        """
+        if camera.running:
+            raise HTTPException(409, "stop the camera before wiping")
+        removed = store.wipe_all()
+        frames = 0
+        for f in cfg.evidence_dir.glob("*.jpg"):
+            try:
+                f.unlink()
+                frames += 1
+            except OSError:
+                log.warning("could not delete evidence frame %s", f.name)
+        removed["evidence_frames"] = frames
+        log.info("dashboard wiped everything: %s", removed)
+        return {"ok": True, "removed": removed}
+
     # ------------------------------------------------------------------ data for the page
 
     @router.get("/api/feed")
@@ -154,10 +184,25 @@ def build_router(cfg: Settings, store: Store) -> APIRouter:
             d = dict(r)
             d["reasons"] = _reasons(d.get("reasons_json"))
             review.append(d)
+        # The outbox: every event we tried to tell somebody about, newest first. Built from
+        # the events themselves rather than a separate log, so it cannot drift out of step
+        # with what was actually recorded.
+        outbox = [
+            {
+                "event_id": e["event_id"],
+                "observed": e["observed"],
+                "priority": e["priority"],
+                "status": e["notify_status"],
+                "at": e.get("updated_at") or e.get("created_at"),
+                "subject": _subject_for(e, cfg),
+            }
+            for e in rows if e.get("notify_status")
+        ]
         return {
             "summary": store.summary(),
             "events": rows,
             "review": review,
+            "outbox": outbox,
             "dead_letters": [dict(r) for r in store.list_dead_letters(20)],
             "camera": camera.status(),
             "site_id": cfg.site_id,
@@ -215,7 +260,24 @@ button.stop{background:var(--bad);color:#2a0709;border-color:transparent;font-we
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:.45rem}
 .live{background:var(--ok);box-shadow:0 0 0 4px rgba(92,201,140,.18)}
 .off{background:#4b525c}
-main{padding:1.25rem;max-width:1180px;margin:0 auto}
+.shell{display:grid;grid-template-columns:1fr 330px;gap:1.25rem;padding:1.25rem;
+        max-width:1500px;margin:0 auto;align-items:start}
+@media(max-width:1000px){.shell{grid-template-columns:1fr}}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      position:sticky;top:76px;max-height:calc(100vh - 96px);display:flex;flex-direction:column}
+aside h3{margin:0;padding:.85rem 1rem;border-bottom:1px solid var(--line);font-size:.74rem;
+         color:var(--dim);text-transform:uppercase;letter-spacing:.1em}
+.outbox{overflow-y:auto;padding:.4rem}
+.mail{padding:.6rem .7rem;border-radius:7px;cursor:pointer;border:1px solid transparent}
+.mail:hover{background:#1d2126;border-color:var(--line)}
+.mail .s{font-size:.79rem;margin-bottom:.2rem;line-height:1.35}
+.mail .m{font-size:.7rem;color:var(--dim);display:flex;gap:.4rem;align-items:center}
+.pill{font-size:.64rem;padding:.1rem .4rem;border-radius:4px;background:#22262c}
+.pill.sent{background:rgba(92,201,140,.16);color:var(--ok)}
+.pill.fail{background:rgba(226,104,107,.16);color:#ff9a9c}
+.pill.pend{background:rgba(240,164,93,.16);color:var(--hi)}
+button.danger{border-color:rgba(226,104,107,.5);color:#ff9a9c;background:#221114}
+button.danger:hover:not(:disabled){border-color:var(--bad);background:#2b1418}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.8rem}
 .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
 .tile b{display:block;font-size:1.9rem;line-height:1.15;font-weight:600}
@@ -268,8 +330,10 @@ footer{color:#4b525c;font-size:.75rem;text-align:center;padding:2.5rem 1rem 1.5r
   <button id=start class=go>▶ Start camera</button>
   <button id=stop class=stop disabled>■ Stop</button>
   <button id=refresh>↻</button>
+  <button id=wipe class=danger>🗑 Delete all data</button>
 </header>
 
+<div class=shell>
 <main>
   <div class=tiles id=tiles></div>
 
@@ -282,6 +346,12 @@ footer{color:#4b525c;font-size:.75rem;text-align:center;padding:2.5rem 1rem 1.5r
   <h2>Delivery failures</h2>
   <div id=dead></div>
 </main>
+
+<aside>
+  <h3>Outbox <span id=obcount style="text-transform:none;letter-spacing:0;float:right"></span></h3>
+  <div class=outbox id=outbox></div>
+</aside>
+</div>
 
 <dialog id=modal><div class=inner id=modalbody></div></dialog>
 <footer>Monitex Demo — polls every 3s. Python decides what happened; n8n decides who hears about it.</footer>
@@ -360,6 +430,18 @@ function render(d){
       <td>${r.attempts}</td><td>${esc((r.error||'').slice(0,90))}</td></tr>`).join('') + `</table>`
     : `<div class=empty>Nothing failed to deliver.</div>`;
 
+  const ob = d.outbox || [];
+  $('#obcount').textContent = ob.length ? ob.length : '';
+  $('#outbox').innerHTML = ob.length ? ob.map(m=>{
+    let cls='pend', label=m.status||'pending';
+    if(/emailed|sent/.test(m.status||'')) cls='sent';
+    else if(/fail|error|none/.test(m.status||'')) cls='fail';
+    return `<div class=mail onclick="showEmail('${m.event_id}')">
+      <div class=s>${esc(m.subject)}</div>
+      <div class=m><span class="pill ${cls}">${esc(label)}</span>
+        <span>${esc((m.at||'').replace('T',' ').slice(0,19))}</span></div></div>`;
+  }).join('') : `<div class=empty style="border:none;background:none">Nothing sent yet.</div>`;
+
   const on = d.camera.running;
   $('#camstate').innerHTML = on
     ? `<span class="dot live"></span>camera live &middot; ${d.camera.uptime_s}s`
@@ -373,6 +455,23 @@ async function tick(){ try{ render(await jget('/api/feed')); }catch(e){ console.
 $('#start').onclick = async () => { $('#start').disabled = true; await jpost('/control/start'); setTimeout(tick,600); };
 $('#stop').onclick  = async () => { $('#stop').disabled  = true; await jpost('/control/stop');  setTimeout(tick,600); };
 $('#refresh').onclick = tick;
+
+$('#wipe').onclick = async () => {
+  if(!confirm('Delete EVERY event, review item, dead letter and evidence photo?
+
+Recorded videos in data/sessions are NOT touched.
+
+This cannot be undone.')) return;
+  $('#wipe').disabled = true;
+  try{
+    const r = await jpost('/control/wipe');
+    const n = r.removed;
+    alert('Wiped.
+
+' + Object.entries(n).filter(([,v])=>v>0).map(([k,v])=>`${v} ${k}`).join('
+') || 'Nothing to delete.');
+  } finally { $('#wipe').disabled = false; tick(); }
+};
 
 tick(); setInterval(tick, 3000);
 </script></body></html>

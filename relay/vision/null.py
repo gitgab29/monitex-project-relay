@@ -1,7 +1,7 @@
 """The no-model backend.
 
 `--vision none` is not a degraded mode bolted on for testing -- it is the path a reviewer
-takes. `relay replay samples/reception_demo.mp4 --vision none --no-n8n` runs the entire
+takes. `relay replay <your-clip>.mp4 --vision none --no-n8n` runs the entire
 pipeline from a clean checkout with no API key, no Docker and no network, and still produces
 events, because every event has a usable template summary before the model is ever consulted.
 

@@ -69,13 +69,18 @@ answer. Everything is still recorded, so the reproducibility a file gives you is
 
 ```bash
 pip install -e .
-relay replay samples/reception_demo.mp4 --vision none --no-n8n
+relay replay <your-clip>.mp4 --vision none --no-n8n
 ```
 
 This is deliberately the first thing in this README. It runs the whole pipeline, writes real
 events to SQLite, and needs nothing but Python. With `--vision none` the summaries come from a
 template and every event is flagged `needs_review` — which is the *designed* degrade path, not
 a broken mode.
+
+**You supply the clip — none ships with this repo.** Any short doorway, driveway or gate video
+works; 10–30 seconds is plenty, and a person walking in and out of frame is all the pipeline
+needs to produce every event type below. If you would rather not find one, `relay run --source
+webcam` does the same thing with a camera.
 
 ```bash
 relay summary          # what is in the database
@@ -130,9 +135,13 @@ The error names torch, which sends you looking in the wrong place; the cause is 
 ### The feed used
 
 A **live USB webcam** (`CAMERA_INDEX=1`, 1280×720 requested, 30 fps nominal) pointed at a desk
-standing in for a reception post. No footage of any real site is used. `samples/reception_demo.mp4`
-is a recorded session from that same camera, included so the keyless path above works with no
-hardware.
+standing in for a reception post. No footage of any real site is used.
+
+**No sample clip ships with this repo, and that is a deliberate cut.** Every frame I recorded
+was of me at my own desk, and a public repo is a poor place for it. The cost is real and worth
+stating: the keyless path above needs you to bring a file. Everything else about it holds — no
+key, no Docker, no camera, no network. Every run writes its own clip to `data/sessions/`, so
+once you have run it once you have a replayable fixture of your own.
 
 ---
 

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from .config import Settings
 from .schema import Event
@@ -198,6 +198,46 @@ def build_router(cfg: Settings, store: Store) -> APIRouter:
     def control_start(show: bool = True) -> dict:
         return camera.start(show=show)
 
+    @router.get("/live.mjpg", include_in_schema=False)
+    def live_stream():
+        """The camera, streamed into the page as motion JPEG.
+
+        The pipeline runs in its own process and drops each annotated frame at
+        data/live.jpg; this re-reads that file and pushes it out as a multipart stream, which
+        every browser renders in a plain <img> -- no player, no JavaScript.
+
+        That is the whole point: one browser window to screen-record, instead of a desktop
+        video window and a browser side by side.
+        """
+        import time as _t
+
+        crlf = b"\r\n"
+
+        def frames():
+            last = None
+            idle = 0
+            while idle < 600:  # ~60s with nothing new, then let the connection go
+                try:
+                    data = cfg.live_frame_path.read_bytes()
+                except OSError:
+                    data = None
+                # A partially written file reads short; os.replace on the writer side makes
+                # that rare, and the length check makes it harmless when it happens.
+                if data and data != last and len(data) > 1000:
+                    last, idle = data, 0
+                    yield (
+                        b"--frame" + crlf
+                        + b"Content-Type: image/jpeg" + crlf
+                        + b"Content-Length: " + str(len(data)).encode() + crlf + crlf
+                        + data + crlf
+                    )
+                else:
+                    idle += 1
+                _t.sleep(0.1)
+
+        return StreamingResponse(
+            frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+
     @router.get("/control/log")
     def control_log(lines: int = 40) -> dict:
         return {"log": camera.tail(lines)}
@@ -335,6 +375,14 @@ aside h3{margin:0;padding:.85rem 1rem;border-bottom:1px solid var(--line);font-s
 .pill.pend{background:rgba(240,164,93,.16);color:var(--hi)}
 button.danger{border-color:rgba(226,104,107,.5);color:#ff9a9c;background:#221114}
 button.danger:hover:not(:disabled){border-color:var(--bad);background:#2b1418}
+.live{background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+      margin-bottom:1.1rem;position:relative}
+.live img{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
+.live .off{position:absolute;inset:0;display:grid;place-items:center;color:#5a616b;
+           background:#0a0b0d;font-size:.85rem;text-align:center;padding:1rem}
+.live .badge{position:absolute;top:.6rem;left:.7rem;background:rgba(0,0,0,.6);
+             border-radius:5px;padding:.2rem .5rem;font-size:.7rem;color:var(--ok);
+             display:flex;align-items:center;gap:.35rem}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.8rem}
 .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
 .tile b{display:block;font-size:1.9rem;line-height:1.15;font-weight:600}
@@ -392,6 +440,10 @@ footer{color:#4b525c;font-size:.75rem;text-align:center;padding:2.5rem 1rem 1.5r
 
 <div class=shell>
 <main>
+  <div class=live id=livebox>
+    <div class=off id=liveoff>Camera is off. Press <b>Start camera</b> above.</div>
+  </div>
+
   <div class=tiles id=tiles></div>
 
   <h2>Events <span id=evcount style="text-transform:none;letter-spacing:0"></span></h2>
@@ -510,6 +562,19 @@ function render(d){
       <div class=m><span class="pill ${cls}">${esc(label)}</span>
         <span>${esc((m.at||'').replace('T',' ').slice(0,19))}</span></div></div>`;
   }).join('') : `<div class=empty style="border:none;background:none">Nothing sent yet.</div>`;
+
+  // The <img> is created when the camera starts and destroyed when it stops. Leaving a
+  // dead multipart stream attached leaves a frozen last frame on screen, which during a demo
+  // looks exactly like a camera that is still running.
+  const box = $('#livebox');
+  const streaming = !!box.querySelector('img');
+  if (d.camera.running && !streaming) {
+    box.innerHTML = '<img alt="live camera" src="/live.mjpg?t=' + Date.now() + '">'
+                  + '<div class=badge><span class="dot live"></span>LIVE</div>';
+  } else if (!d.camera.running && streaming) {
+    box.innerHTML = '<div class=off id=liveoff>Camera is off. '
+                  + 'Press <b>Start camera</b> above.</div>';
+  }
 
   const on = d.camera.running;
   $('#camstate').innerHTML = on

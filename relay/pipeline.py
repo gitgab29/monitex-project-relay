@@ -17,6 +17,7 @@ what "analysing a frame" means.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -166,11 +167,17 @@ class Pipeline:
                         self.stats.frames_skipped_quiet += 1
                         log.debug("QUIET f%d score=%.2f", frame.index, decision.score)
 
-                if self.show:
-                    window.show(self._render(frame))
-                    if window.should_quit():
-                        log.info("quit requested from the overlay window")
-                        break
+                # Rendered once and used twice: the desktop window, and the JPEG the dashboard
+                # streams. Recording a demo should not mean juggling two windows.
+                if self.show or self.cfg.live_preview:
+                    rendered = self._render(frame)
+                    if self.cfg.live_preview and frame.index % self.cfg.live_preview_every == 0:
+                        self._publish_live(rendered)
+                    if self.show:
+                        window.show(rendered)
+                        if window.should_quit():
+                            log.info("quit requested from the overlay window")
+                            break
 
                 if self.max_seconds and frame.video_ts_ms >= self.max_seconds * 1000:
                     log.info("reached --max-seconds %.0f", self.max_seconds)
@@ -256,6 +263,31 @@ class Pipeline:
                 motion_score=decision.score, gate_reason=decision.reason,
                 mean_luma=decision.mean_luma, analyzed=decision.analyze,
             )
+
+    def _publish_live(self, rendered) -> None:
+        """Drop the annotated frame where the dashboard can pick it up.
+
+        A file rather than a socket, because the camera runs in its own process: the API cannot
+        reach into it for frames, and a file is the simplest thing that crosses that boundary.
+
+        Written to a temp name and then replaced, so a reader never catches a half-written
+        JPEG -- os.replace is atomic, and the alternative is an occasional torn frame on
+        screen during the one recording that matters.
+
+        Never raises. A preview that fails is a cosmetic problem; it must not take down a run.
+        """
+        try:
+            import cv2
+
+            path = self.cfg.live_frame_path
+            tmp = path.with_suffix(".tmp.jpg")
+            ok, buf = cv2.imencode(".jpg", rendered, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if not ok:
+                return
+            tmp.write_bytes(buf.tobytes())
+            os.replace(tmp, path)
+        except Exception:
+            log.debug("could not publish the live frame", exc_info=True)
 
     def _render(self, frame: Frame):
         with self._render_lock:

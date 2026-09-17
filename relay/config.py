@@ -112,6 +112,10 @@ class Settings:
 
     # vision
     # --- static-object suppression (pictures, posters, screens) -------------------
+    #: Publish the annotated frame to disk so the dashboard can show the camera. Lets a
+    #: demo be recorded as one browser window instead of a window-juggling act.
+    live_preview: bool = True
+    live_preview_every: int = 4          # every Nth decoded frame (~7 fps at 30 fps)
     static_filter: bool = True
     static_min_frames: int = 20
     static_pixel_eps: float = 2.5
@@ -171,6 +175,10 @@ class Settings:
     @property
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
+
+    @property
+    def live_frame_path(self) -> Path:
+        return self.data_dir / "live.jpg"
 
     @property
     def evidence_dir(self) -> Path:
@@ -266,6 +274,8 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env", *, override:
         review_conf_threshold=_f("REVIEW_CONF_THRESHOLD", 0.75),
         review_conf_other=_f("REVIEW_CONF_OTHER", 0.85),
         review_conf_high=_f("REVIEW_CONF_HIGH", 0.90),
+        live_preview=_b("LIVE_PREVIEW", True),
+        live_preview_every=_i("LIVE_PREVIEW_EVERY", 4),
         static_filter=_b("STATIC_FILTER", True),
         static_min_frames=_i("STATIC_MIN_FRAMES", 20),
         static_pixel_eps=_f("STATIC_PIXEL_EPS", 2.5),

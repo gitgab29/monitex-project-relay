@@ -154,6 +154,11 @@ def create_app(cfg: Settings, store: Store) -> FastAPI:
             return HTMLResponse(_summary_html(data, cfg))
         return data
 
+    # The dashboard: evidence frames, camera control, and the single page over all of it.
+    from .dashboard import build_router
+
+    app.include_router(build_router(cfg, store))
+
     return app
 
 

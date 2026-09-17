@@ -26,6 +26,31 @@ from .schema import Event, Observation
 log = logging.getLogger(__name__)
 
 
+def _save_evidence(cfg: Settings, event_id: str, draft) -> None:
+    """Write the frame this event was created from, as `data/evidence/<event_id>.jpg`.
+
+    Named by event_id rather than by timestamp so it is addressable from the event row with no
+    extra column and no join: the dashboard asks for /evidence/<id>.jpg and either gets a frame
+    or gets a 404, which is exactly the two states that exist.
+
+    Deliberately never raises. Evidence is valuable but it is not worth losing an event over --
+    a disk that is full should cost us the picture, not the alert.
+    """
+    frame = getattr(draft, "key_frame", None)
+    if frame is None:
+        return
+    path = cfg.evidence_dir / f"{event_id}.jpg"
+    if path.exists():
+        return  # same event seen again; the first frame is the one that opened it
+    try:
+        import cv2
+
+        cfg.evidence_dir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    except Exception:
+        log.debug("could not write evidence for %s", event_id, exc_info=True)
+
+
 def enrich_and_store(draft, obs: Observation, pipe) -> Event | None:
     """Called by the pipeline for each draft the state machine emits.
 
@@ -85,6 +110,7 @@ def enrich_and_store(draft, obs: Observation, pipe) -> Event | None:
         "summary_source": summary_source, "review_reasons": reasons,
     }
     inserted = store.upsert_event(event, prov)
+    _save_evidence(cfg, event_id, draft)
 
     if not inserted:
         # A `close` draft is this run extending an occurrence it opened moments ago -- an

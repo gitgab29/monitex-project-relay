@@ -155,8 +155,21 @@ def test_the_body_explains_why_review_was_triggered():
     assert "Guard seated at the reception desk." in body
 
 
-def test_the_body_carries_the_raw_event_record():
-    assert '"event_id": "e1"' in format_body(event())
+def test_the_body_identifies_the_event_without_dumping_it():
+    """The body used to end with a pretty-printed JSON dump of the whole event. It was
+    removed: it tripled the length and pushed the review link below the fold on a phone,
+    which is the one thing the reader has to act on. The id still has to be there, because
+    it is how a reply or a support call refers to this specific alert."""
+    body = format_body(event())
+    assert "e1" in body
+    assert '"event_id":' not in body
+
+
+def test_the_body_stays_short_enough_to_read_on_a_phone():
+    body = format_body(event(), reasons=["low_confidence", "missing_site_id"],
+                       review_link="http://localhost:8080/review/e1")
+    assert len(body.splitlines()) <= 12
+    assert len(body) < 600
 
 
 # ---------------------------------------------------------------- assembly

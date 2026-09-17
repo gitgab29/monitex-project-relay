@@ -156,6 +156,15 @@ class Settings:
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
 
+    @property
+    def evidence_dir(self) -> Path:
+        """One JPEG per event -- the frame the event was actually created from.
+
+        A summary saying "a person is at the post" is a claim; the frame is the evidence for
+        it. Kept out of the database on purpose: SQLite is for rows people query, not blobs.
+        """
+        return self.data_dir / "evidence"
+
     def analyze_every(self, fps: float) -> int:
         """How many decoded frames per analysed frame, at this source's fps.
 
@@ -180,7 +189,7 @@ class Settings:
         return t
 
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.sessions_dir, self.logs_dir):
+        for d in (self.data_dir, self.sessions_dir, self.logs_dir, self.evidence_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def config_hash(self) -> str:

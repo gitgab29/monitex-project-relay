@@ -53,26 +53,27 @@ def format_subject(event: Event, *, needs_review: bool) -> str:
 
 
 def format_body(event: Event, *, reasons: list[str] | None = None, review_link: str | None = None) -> str:
-    """The email body.
+    """The email body, written to be read on a phone at 3 a.m.
 
-    Ordered for someone reading it on a phone at 3 a.m.: what happened, then why we are
-    unsure, then the link to act, then the raw record for anyone who wants it.
+    Short on purpose. This used to end with a pretty-printed JSON dump of the whole event,
+    which roughly tripled the length and pushed the one thing the reader has to act on --
+    the link -- below the fold on a phone. The dump was there "in case someone wants the
+    detail", but the link leads to the detail, and nobody scrolls past a wall of JSON at 3
+    a.m. to find it.
+
+    What is left is: what happened, where and how sure we are, why a human is being asked,
+    and the link. Five lines and an action.
     """
-    import json
-
+    site = event.site_id or "(site not configured)"
     lines = [
         event.summary,
         "",
-        f"site:       {event.site_id or '(not configured)'}",
-        f"observed:   {event.observed}",
-        f"category:   {event.category} / {event.priority}",
-        f"confidence: {event.confidence:.2f}",
-        f"at:         {event.video_ts} in {event.source_file}",
+        f"{event.observed}  |  {event.category}/{event.priority}  |  confidence {event.confidence:.2f}",
+        f"{site}  |  at {event.video_ts}",
     ]
     if reasons:
-        lines += ["", "flagged for review because:"]
-        lines += [f"  - {r}" for r in reasons]
+        lines += ["", "Needs a human because: " + ", ".join(reasons)]
     if review_link:
-        lines += ["", f"review: {review_link}"]
-    lines += ["", "--- event record ---", json.dumps(event.model_dump(), indent=2)]
+        lines += ["", f"Review it: {review_link}"]
+    lines += ["", f"[{event.event_id}]"]
     return "\n".join(lines)

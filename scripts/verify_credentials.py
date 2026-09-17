@@ -39,9 +39,12 @@ def check_gemini(cfg) -> bool:
         return False
     key = cfg.gemini_api_key
     ok(f"GEMINI_API_KEY present ({len(key)} chars, starts {key[:4]}...)")
-    if not key.startswith("AIza"):
-        bad("that does not look like a Google API key (they start with 'AIza')",
-            "you may have copied a project id or an OAuth client id by mistake")
+    # Deliberately NOT asserting a prefix. Older AI Studio keys start "AIza", newer ones
+    # start "AQ."; hard-coding either turns a working key into a scary red FAIL. The live
+    # call below is the only check that actually means anything.
+    if len(key) < 30:
+        bad(f"that is only {len(key)} characters, which is short for an API key",
+            "you may have copied a project id or truncated the paste")
     ok(f"GEMINI_MODEL = {cfg.gemini_model}")
 
     try:

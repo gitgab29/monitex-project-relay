@@ -113,7 +113,7 @@ class Settings:
     # vision
     vision_backend: str = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
     vision_timeout_s: float = 12.0
     vision_min_interval_s: float = 4.0
     vision_jpeg_quality: int = 80
@@ -243,7 +243,7 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env", *, override:
         review_conf_high=_f("REVIEW_CONF_HIGH", 0.90),
         vision_backend=_env("VISION_BACKEND", "gemini").strip().lower(),
         gemini_api_key=_env("GEMINI_API_KEY", ""),
-        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         vision_timeout_s=_f("VISION_TIMEOUT_S", 12.0),
         vision_min_interval_s=_f("VISION_MIN_INTERVAL_S", 4.0),
         vision_jpeg_quality=_i("VISION_JPEG_QUALITY", 80),

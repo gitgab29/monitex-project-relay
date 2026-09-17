@@ -133,26 +133,40 @@ def test_both_sinks_failing_still_records_everything(cfg, store):
 
 # ---------------------------------------------------------------- message formatting
 
-def test_the_subject_leads_with_the_site_and_the_severity():
+def test_the_subject_leads_with_the_site_and_reads_as_english():
     s = format_subject(event(priority=Priority.high), needs_review=False)
-    assert s.startswith("[site-118] HIGH:") and "post_manned" in s
+    assert s.startswith("[site-118] ")
+    assert "_" not in s, f"a raw state identifier leaked into the subject: {s!r}"
 
 
-def test_a_review_subject_says_so_and_carries_the_confidence():
+def test_a_review_subject_asks_for_a_person_in_words():
+    """"REVIEW NEEDED (0.42)" is a status code with a decimal in it. The recipient is being
+    asked to go and look, so the subject should say that."""
     s = format_subject(event(confidence=0.42), needs_review=True)
-    assert "REVIEW NEEDED" in s and "0.42" in s
+    assert "check" in s.lower()
+    assert "0.42" not in s
 
 
 def test_a_missing_site_id_is_visible_in_the_subject():
-    assert "[unknown-site]" in format_subject(event(site_id=None), needs_review=False)
+    assert "[unknown site]" in format_subject(event(site_id=None), needs_review=False)
 
 
-def test_the_body_explains_why_review_was_triggered():
+def test_the_body_explains_why_review_was_triggered_in_prose():
+    """Reason codes are for the database. Somebody woken at 3 a.m. should read a sentence."""
     body = format_body(event(), reasons=["low_confidence", "missing_site_id"],
                        review_link="http://localhost:8080/review/e1")
-    assert "low_confidence" in body and "missing_site_id" in body
+    assert "low_confidence" not in body and "missing_site_id" not in body
+    assert "not a confident one" in body
+    assert "no site is configured" in body
     assert "http://localhost:8080/review/e1" in body
-    assert "Guard seated at the reception desk." in body
+
+
+def test_an_unknown_reason_code_still_reads_as_words():
+    """A reason added to the rules before it is added to the prose table must degrade to
+    something readable, not print a snake_case token at a human."""
+    body = format_body(event(), reasons=["some_new_trigger"])
+    assert "some new trigger" in body
+    assert "some_new_trigger" not in body
 
 
 def test_the_body_identifies_the_event_without_dumping_it():
@@ -168,8 +182,20 @@ def test_the_body_identifies_the_event_without_dumping_it():
 def test_the_body_stays_short_enough_to_read_on_a_phone():
     body = format_body(event(), reasons=["low_confidence", "missing_site_id"],
                        review_link="http://localhost:8080/review/e1")
-    assert len(body.splitlines()) <= 12
-    assert len(body) < 600
+    assert len(body.splitlines()) <= 20
+    assert len(body) < 900
+
+
+def test_the_body_opens_with_the_headline_not_a_field_dump():
+    """The first line is the whole message for anyone reading a notification preview."""
+    ev = event(observed="unidentified_person_at_post", priority=Priority.high)
+    first = format_body(ev).splitlines()[0]
+    assert first == "Unidentified person at your post."
+
+
+def test_the_body_says_what_to_do_about_it():
+    body = format_body(event(observed="post_unattended"))
+    assert "Check whether the officer has stepped away." in body
 
 
 # ---------------------------------------------------------------- assembly

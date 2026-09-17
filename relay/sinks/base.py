@@ -45,11 +45,51 @@ class Sink(Protocol):
     def deliver(self, event: Event, *, review_link: str | None = None) -> DeliveryResult: ...
 
 
+#: The state machine's labels are identifiers -- fine in a database, wrong in a sentence
+#: somebody reads on a phone. Each one gets a headline and the action it implies.
+HEADLINE: dict[str, tuple[str, str]] = {
+    "unidentified_person_at_post": (
+        "Unidentified person at your post",
+        "Someone who is not the assigned officer is at the desk. Worth a look now.",
+    ),
+    "post_unattended": (
+        "Your post is unattended",
+        "Nobody is at the desk. Check whether the officer has stepped away.",
+    ),
+    "person_loitering_near_entry": (
+        "Someone is loitering near the entry",
+        "A person has stayed by the entrance without coming in.",
+    ),
+    "post_manned": (
+        "Your post is manned",
+        "The desk is covered. No action needed.",
+    ),
+}
+
+
+def headline_for(event: Event) -> tuple[str, str]:
+    """Plain-English headline and next step. Unknown states degrade to something readable
+    rather than leaking an identifier into the subject line."""
+    return HEADLINE.get(
+        event.observed,
+        (event.observed.replace("_", " ").capitalize(), "Worth a look."),
+    )
+
+
+def _when(event: Event) -> str:
+    """`video_ts` is an offset into the recording, which reads like nonsense on its own -- an
+    alert saying "at 00:00:01.00" tells a human nothing. Label it for what it is."""
+    return f"{event.video_ts} into the recording"
+
+
 def format_subject(event: Event, *, needs_review: bool) -> str:
-    site = event.site_id or "unknown-site"
+    site = event.site_id or "unknown site"
+    head, _ = headline_for(event)
     if needs_review:
-        return f"[{site}] REVIEW NEEDED: {event.observed} ({event.confidence:.2f})"
-    return f"[{site}] {event.priority.upper()}: {event.observed} at {event.video_ts}"
+        return f"[{site}] Check please: {head.lower()}"
+    if event.priority == "high":
+        return f"[{site}] {head}"
+    return f"[{site}] {head.lower()}"
 
 
 def format_body(event: Event, *, reasons: list[str] | None = None, review_link: str | None = None) -> str:
@@ -64,16 +104,56 @@ def format_body(event: Event, *, reasons: list[str] | None = None, review_link: 
     What is left is: what happened, where and how sure we are, why a human is being asked,
     and the link. Five lines and an action.
     """
-    site = event.site_id or "(site not configured)"
+    site = event.site_id or "an unconfigured site"
+    head, action = headline_for(event)
+
     lines = [
-        event.summary,
+        f"{head}.",
+        f"{site} - {_when(event)}",
         "",
-        f"{event.observed}  |  {event.category}/{event.priority}  |  confidence {event.confidence:.2f}",
-        f"{site}  |  at {event.video_ts}",
+        action,
     ]
+    # The model's own sentence, only when it adds something the headline did not already say.
+    if event.summary and event.summary.rstrip(".").lower() not in head.lower():
+        lines += ["", f"What the camera saw: {event.summary}"]
+
     if reasons:
-        lines += ["", "Needs a human because: " + ", ".join(reasons)]
+        lines += ["", "We are not certain: " + _explain(reasons) + "."]
+
+    lines += [
+        "",
+        "Details",
+        f"  Confidence   {event.confidence:.0%}",
+        f"  Severity     {event.priority}",
+        f"  Type         {event.category}",
+        f"  Recording    {event.source_file}",
+    ]
     if review_link:
-        lines += ["", f"Review it: {review_link}"]
-    lines += ["", f"[{event.event_id}]"]
+        lines += ["", f"Review it here: {review_link}"]
+    lines += ["", f"Reference {event.event_id}"]
     return "\n".join(lines)
+
+
+#: Reason codes are for the database. This is what they mean to the person being paged.
+_REASON_PROSE: dict[str, str] = {
+    "low_confidence": "the reading was not a confident one",
+    "high_priority_low_confidence": "this is urgent but the reading was not confident",
+    "other_low_confidence": "it did not fit a known pattern cleanly",
+    "missing_site_id": "no site is configured, so this could not be routed properly",
+    "missing_video_ts": "the timestamp into the recording is missing",
+    "zone_straddle": "the person was right on the edge of the post area",
+    "stage_disagreement": "the detector and the model counted different numbers of people",
+    "vision_unavailable": "the description was written automatically, not by the model",
+    "vision_bad_schema": "the model's reply could not be read",
+    "vision_timeout": "the model did not answer in time",
+    "vision_rate_limited": "the model was rate-limited",
+    "vision_failed": "the model call failed",
+    "model_reports_dark": "the model said the frame was too dark to read",
+}
+
+
+def _explain(reasons: list[str]) -> str:
+    parts = [_REASON_PROSE.get(r, r.replace("_", " ")) for r in reasons]
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]

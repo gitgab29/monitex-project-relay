@@ -128,17 +128,17 @@ def test_the_envelope_headers_are_set(cfg, fake_smtp):
     assert msg["Subject"]
 
 
-def test_the_subject_carries_the_site_and_severity(cfg, fake_smtp):
+def test_the_subject_carries_the_site_and_reads_as_english(cfg, fake_smtp):
     deliver(cfg)
     subject = fake_smtp.instances[0].messages[0]["Subject"]
     assert "site-118" in subject
-    assert "HIGH" in subject.upper()
+    assert "_" not in subject, f"a raw state identifier leaked into the subject: {subject!r}"
 
 
-def test_a_review_event_says_so_in_the_subject(cfg, fake_smtp):
+def test_a_review_event_asks_for_a_person_in_the_subject(cfg, fake_smtp):
     deliver(cfg, event_kw={"needs_review": True})
     subject = fake_smtp.instances[0].messages[0]["Subject"]
-    assert "REVIEW" in subject.upper()
+    assert "check" in subject.lower()
 
 
 def test_the_review_link_reaches_the_body(cfg, fake_smtp):
@@ -147,10 +147,12 @@ def test_the_review_link_reaches_the_body(cfg, fake_smtp):
     assert link in fake_smtp.instances[0].messages[0].get_content()
 
 
-def test_the_reasons_reach_the_body(cfg, fake_smtp):
+def test_the_reasons_reach_the_body_as_prose(cfg, fake_smtp):
     deliver(cfg, event_kw={"needs_review": True}, reasons=["low_confidence", "missing_site_id"])
     body = fake_smtp.instances[0].messages[0].get_content()
-    assert "low_confidence" in body and "missing_site_id" in body
+    assert "not a confident one" in body
+    assert "no site is configured" in body
+    assert "low_confidence" not in body
 
 
 def test_the_body_is_not_empty(cfg, fake_smtp):

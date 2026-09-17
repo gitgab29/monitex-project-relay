@@ -213,10 +213,13 @@ def test_evidence_route_404s_when_there_is_no_frame(client, store):
 
 
 def test_email_preview_uses_the_real_formatters(client, store):
+    """Same functions the sinks use, so the preview is the email rather than a mock-up of it --
+    including the plain-English wording, not the reason codes underneath it."""
     seed(store)
     m = client.get("/api/events/evt0000000000000/email").json()
-    assert "REVIEW NEEDED" in m["subject"]
-    assert "low_confidence" in m["body"]
+    assert "check" in m["subject"].lower()
+    assert "not a confident one" in m["body"]
+    assert "low_confidence" not in m["body"]
     assert "/review/evt0000000000000" in m["body"]
 
 

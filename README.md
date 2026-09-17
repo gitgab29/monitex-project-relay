@@ -10,7 +10,7 @@ produce the same events.
 
 ## 1 · Demo
 
-**▶ [Demo video](DRIVE_LINK_HERE)** *(3–5 min, anyone with the link)*
+**▶ [Demo video](https://drive.google.com/file/d/12p9dGlqt49p3nZGtXmVTDfWnIKuSCuGl/view?usp=sharing)** *(5 min, anyone with the link)*
 
 What you are looking at, in one paragraph: a webcam pointed at a desk. The overlay draws the
 **post zone** (the desk itself) and the **approach zone** (everything else). A motion gate

@@ -83,6 +83,7 @@ class Pipeline:
         self._stop = threading.Event()
         self._latest_render: dict = {}
         self._render_lock = threading.Lock()
+        self._last_obs: Observation | None = None
 
     # ------------------------------------------------------------------ entry points
 
@@ -181,6 +182,7 @@ class Pipeline:
             if recorder is not None:
                 recorder.close()
                 self.store.end_session(self.session_id)
+            self._finish_states()
             self._flush_counters()
             self.store.end_run(self.run_id, status)
 
@@ -219,8 +221,10 @@ class Pipeline:
             post_state = self.state_machine.post_state
             approach_state = self.state_machine.approach_state
             for draft in drafts:
+                draft.key_frame = frame.image
                 if self.enricher is not None:
                     self.enricher(draft, obs, self)
+        self._last_obs = obs
         self.store.add_observation(obs, post_state, approach_state)
         with self._render_lock:
             self._latest_render["detections"] = detections
@@ -230,6 +234,12 @@ class Pipeline:
                 self._latest_render["approach_state"] = approach_state
 
     # ------------------------------------------------------------------ rendering
+
+    def set_banner(self, text: str) -> None:
+        """Put the most recent event on the overlay. Called from the analysis thread, so it
+        takes the same lock the renderer does."""
+        with self._render_lock:
+            self._latest_render["extra"] = text
 
     def _remember_render(self, decision) -> None:
         with self._render_lock:
@@ -253,6 +263,17 @@ class Pipeline:
         )
 
     # ------------------------------------------------------------------ bookkeeping
+
+    def _finish_states(self) -> None:
+        """An occurrence still running when the video ends is still an occurrence; close it
+        so its extent is recorded rather than left dangling."""
+        if self.state_machine is None or self.enricher is None or self._last_obs is None:
+            return
+        try:
+            for draft in self.state_machine.finish():
+                self.enricher(draft, self._last_obs, self)
+        except Exception:
+            log.exception("failed to close out open states")
 
     def _flush_counters(self) -> None:
         s = self.stats

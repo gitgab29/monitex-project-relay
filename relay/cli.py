@@ -76,23 +76,37 @@ def build_parser() -> argparse.ArgumentParser:
 
 # ---------------------------------------------------------------------- commands
 
-def cmd_run(args, cfg, store) -> int:
+def _build_pipeline(args, cfg, store, mode: str):
+    """Assemble the pipeline. Everything expensive is constructed here, once, so the run loop
+    stays a loop."""
+    from .detect.state import PostStateMachine
+    from .detect.yolo import YoloPersonDetector
+    from .detect.zones import ZoneModel
+    from .enrich import enrich_and_store
     from .pipeline import Pipeline
 
+    zones = ZoneModel(cfg)
+    log.info("zones: %s", zones.describe())
+    pipe = Pipeline(
+        cfg, store, mode=mode, show=args.show, max_seconds=args.max_seconds, chaos=args.chaos,
+        detector=YoloPersonDetector(cfg, zones=zones),
+        state_machine=PostStateMachine(cfg),
+        enricher=enrich_and_store,
+    )
+    return pipe
+
+
+def cmd_run(args, cfg, store) -> int:
+    import dataclasses
+
     if args.camera is not None:
-        cfg = __import__("dataclasses").replace(cfg, camera_index=args.camera)
-    pipe = Pipeline(cfg, store, mode="live", show=args.show,
-                    max_seconds=args.max_seconds, chaos=args.chaos)
-    pipe.run_live()
+        cfg = dataclasses.replace(cfg, camera_index=args.camera)
+    _build_pipeline(args, cfg, store, "live").run_live()
     return 0
 
 
 def cmd_replay(args, cfg, store) -> int:
-    from .pipeline import Pipeline
-
-    pipe = Pipeline(cfg, store, mode="replay", show=args.show,
-                    max_seconds=args.max_seconds, chaos=args.chaos)
-    pipe.run_replay(args.path, session_id=args.session_id)
+    _build_pipeline(args, cfg, store, "replay").run_replay(args.path, session_id=args.session_id)
     return 0
 
 

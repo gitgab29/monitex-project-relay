@@ -20,7 +20,7 @@ import logging
 
 from .config import Settings
 from .ids import video_ts
-from .rules import classify, compose_confidence, template_summary
+from .rules import classify, compose_confidence, review_reasons, template_summary
 from .schema import Event, Observation
 
 log = logging.getLogger(__name__)
@@ -59,19 +59,12 @@ def enrich_and_store(draft, obs: Observation, pipe) -> Event | None:
             elif vconf is not None:
                 confidence = round((confidence + vconf) / 2, 4)
 
-    # --- review triggers (extended in Block 5) ---------------------------------------
-    if cfg.site_id is None:
-        reasons.append("missing_site_id")
-    if draft.straddle:
-        reasons.append("zone_straddle")
-    threshold = cfg.review_threshold_for(category.value, priority.value)
-    if confidence < threshold:
-        reasons.append("low_confidence")
-        if priority.value == "high":
-            reasons.append("high_priority_low_confidence")
-        if category.value == "other":
-            reasons.append("other_low_confidence")
-    reasons = sorted(set(reasons))
+    # --- review triggers -------------------------------------------------------------
+    ts = video_ts(draft.first_seen_ms)
+    reasons = review_reasons(
+        confidence=confidence, category=category.value, priority=priority.value,
+        site_id=cfg.site_id, video_ts=ts, straddle=draft.straddle, cfg=cfg, extra=reasons,
+    )
 
     event_id, reused = store.resolve_event_id(
         pipe.session_id, draft.observed, draft.first_seen_ms,
@@ -79,7 +72,7 @@ def enrich_and_store(draft, obs: Observation, pipe) -> Event | None:
     )
     event = Event(
         event_id=event_id, source_file=pipe.source_file, category=category, priority=priority,
-        observed=draft.observed, video_ts=video_ts(draft.first_seen_ms), site_id=cfg.site_id,
+        observed=draft.observed, video_ts=ts, site_id=cfg.site_id,
         summary=summary, confidence=confidence, needs_review=bool(reasons),
     )
     prov = {

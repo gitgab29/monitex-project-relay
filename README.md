@@ -111,6 +111,22 @@ relay run --source webcam --show            # live, with the overlay window
 For n8n, see [n8n/README.md](n8n/README.md). **It is optional** — if it is not running, the
 router falls through to direct SMTP and says so in the log.
 
+### If `pip install` fails on Windows
+
+If the install dies with an `OSError: [Errno 2] No such file or directory` naming a file deep
+inside `torch/_functorch/...`, that is **Windows' 260-character path limit**, not a broken
+package. Torch ships some very long filenames, and a deep clone location pushes them over.
+
+Clone somewhere shallow — `C:\dev\relay` rather than
+`C:\Users\you\Downloads\assessments\...` — or enable long paths:
+
+```powershell
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
+
+The error names torch, which sends you looking in the wrong place; the cause is the path.
+
 ### The feed used
 
 A **live USB webcam** (`CAMERA_INDEX=1`, 1280×720 requested, 30 fps nominal) pointed at a desk
